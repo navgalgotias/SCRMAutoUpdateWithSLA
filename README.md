@@ -43,6 +43,37 @@ The password fields show these rules as a live checklist. The Apps Script enforc
 
 Passwords are stored in the Sheet only as **salted, peppered, iterated HMAC-SHA256 hashes**. The pepper lives in the Apps Script's Script Properties, not in the Sheet, so even someone who gets a copy of the Sheet can't check password guesses offline.
 
+## Ticket SLA
+
+The **Ticket SLA** tab is the CRM SLA monitoring dashboard (crmsla.altametrics.com), loading tickets straight from vTiger
+over the signed-in session instead of from an uploaded CSV report. It loads when you open the tab, and **Refresh from
+CRM** reloads it. It covers the same tickets as the CRM SLA report: those created in the last 30 days, apart from the
+**AnyConnector** organization's partner-integration tickets.
+
+| Table | What it shows |
+| --- | --- |
+| **Open Tickets** | Tickets whose Internal Status isn't *Closed*, soonest breach first: SLA Remaining Hours, SLA Breach Time, Organisation, Title, Date Created. Amber = approaching breach, red = breached. |
+| **Daily Operation Stats** | For today and the 10 days before it: tickets created that day (*Open Today*), tickets closed that day (*Closed Today*), and still-open tickets created on or before that day (*EOD Open Count*). |
+| **SLA Breach** | Closed tickets by the week (Monday start) they were closed in: how many breached SLA, as a % overall and per severity. |
+
+The calculations are the CRM SLA app's own. They were checked against its output for the same CSV report, and every
+number matched:
+
+- **SLA hours** run 24 hours a day but skip excluded weekdays (Sat/Sun) and holidays entirely.
+- **Severity** = *Internal Severity*. When that's blank, the client's *Severity* is used and the row is tagged *(client)*.
+- **SLA Breach Time** = Created Time + the severity's limit (High 8 h, Medium 72 h, Low 168 h) in SLA hours.
+- **SLA Remaining Hours** = SLA hours from now to the breach time, rounded to the nearest hour (times to the whole minute).
+- **Closed** = Internal Status *Closed*, at its *Internal Closed Time*. A closed ticket **breached** if that is after its breach time.
+- **Breach %** = breached ÷ closed, rounded (the header shows 2 decimals). The High/Mid/Low rates count only tickets that have an Internal Severity.
+
+**One difference:** *Internal Closed Time* is free text in vTiger and appears as `yyyy-mm-dd`, `mm/dd/yyyy` and
+`mm-dd-yyyy`. The CRM SLA app only reads `mm/dd/yyyy` and silently drops every other ticket, which makes its breach
+rates far too low. This tab reads all three. Tickets it still can't use (an unreadable date, or *Closed* with no
+closed time) are listed under **Error**.
+
+The rules (SLA hours, approaching thresholds, excluded weekdays, holidays, how far back to load, timezones, field
+labels) are in `js/config.js` under `sla`. Add each year's holidays there.
+
 ## Project structure
 
 ```
@@ -50,6 +81,7 @@ index.html                          Markup / app shell (auto-connect header + 4-
 css/style.css                       Page-layout only (spacing/structure) — component look-and-feel comes from the design system
 js/config.js                        Deployment config — the Apps Script web app URL (userApiUrl)
 js/app.js                           All application logic (Excel parsing, vTiger API calls, UI wiring)
+js/sla.js                           Ticket SLA tab — loads tickets from vTiger and calculates the SLA tables
 apps-script/Code.gs                 The user database backend — paste into the Google Sheet's Apps Script editor
 assets/                             Logo/favicon (SVG)
 Altametrics Growth Design System/   The design system this UI is built on (tokens, components, icons, fonts)
@@ -117,6 +149,19 @@ This app calls vTiger's `webservice.php` directly from the browser using `fetch`
 - If you host it elsewhere (e.g. GitHub Pages), your vTiger web server (Apache/Nginx in front of vTiger) must send `Access-Control-Allow-Origin` headers permitting this app's origin, and must respond correctly to any CORS preflight requests. Ask your vTiger administrator to enable this if you see a network/CORS error on the login screen.
 
 Because vTiger's `webservice.php` is normally same-origin only, this is a limitation of using a pure static/front-end app — it is not a bug in this project.
+
+### Running locally
+
+vTiger only allows the hosted app's origin (`https://navgalgotias.github.io`), so a copy opened from `localhost` can't
+call it directly. Run the bundled dev server instead of a plain static server:
+
+```
+python dev-server.py            # http://localhost:8080, forwards vTiger calls to https://scrm.altametrics.com/
+python dev-server.py --port 9000 --crm https://other-crm.example.com/
+```
+
+It serves this folder and forwards `/vtiger-proxy/…` to the CRM. When the app is opened on `localhost` it sends its
+vTiger calls there automatically. The server only listens on 127.0.0.1. The hosted copy is unaffected.
 
 ## Detecting "red" highlights
 

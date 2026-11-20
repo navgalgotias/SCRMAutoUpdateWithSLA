@@ -490,6 +490,7 @@
     els.passwordOverlay.hidden = true;
     clearIdleTimer();
     resetLoginForm();
+    document.dispatchEvent(new CustomEvent("crm:signedout"));
   }
 
   /* ---------------------------------------------------------------------
@@ -573,7 +574,12 @@
     return url.trim().replace(/\/+$/, "") + "/";
   }
 
+  /* On localhost, vTiger's CORS rules block direct calls, so go through the
+   * dev server's proxy (dev-server.py), which forwards to the CRM. */
+  const USE_DEV_PROXY = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+
   function webserviceUrl() {
+    if (USE_DEV_PROXY) return "/vtiger-proxy/webservice.php";
     return normalizeBaseUrl(state.crm.url) + "webservice.php";
   }
 
@@ -681,6 +687,18 @@
     },
   };
 
+  /* Read-only handle for the Ticket SLA tab (js/sla.js), so it reuses this
+   * signed-in vTiger session instead of logging in again. It fires
+   * "crm:connected" on document after every successful connect and
+   * "crm:signedout" whenever the login screen comes back. */
+  window.CrmBridge = {
+    VTiger,
+    session: () => state.session,
+    module: () => state.crm.module,
+    moduleFields: () => state.moduleFields,
+    toast: (message, type) => toast(message, type),
+  };
+
   /* Turn a vTiger `describe` field type into: is it a reference field, and to which modules? */
   function referenceModulesForField(fieldMeta) {
     if (!fieldMeta || !fieldMeta.type) return null;
@@ -783,6 +801,7 @@
         }
       }
 
+      document.dispatchEvent(new CustomEvent("crm:connected"));
       return true;
     } catch (err) {
       state.session = null;

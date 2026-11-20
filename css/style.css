@@ -717,6 +717,102 @@ select:disabled { opacity: 0.55; cursor: not-allowed; }
 #users-table .btn-remove-user:hover { text-decoration: underline; }
 
 /* ---------------------------------------------------------------------
+ * Section tabs (Ticket Update / Ticket SLA)
+ * ------------------------------------------------------------------- */
+.app-tabs { margin: var(--space-5) 0 var(--space-4); }
+.app-tabs button.tab { font-family: inherit; }
+.app-tabs .tab:focus-visible { box-shadow: var(--focus-ring); outline: none; }
+
+/* ---------------------------------------------------------------------
+ * Ticket SLA (js/sla.js) — the CRM SLA monitoring dashboard
+ * ------------------------------------------------------------------- */
+.sla-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.sla-jump, .sla-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+/* Same colour coding as the CRM SLA monitoring app's buttons. */
+.sla-jump .btn { color: var(--white); border: 1px solid transparent; border-radius: 20px; padding: 3px 14px; text-decoration: none; }
+.sla-jump .btn:hover { filter: brightness(0.94); }
+.sla-jump .btn:focus-visible { box-shadow: var(--focus-ring); outline: none; }
+.sla-jump-open { background: var(--green); }
+.sla-jump-dos { background: var(--blue); }
+.sla-jump-breach { background: var(--yellow); }
+.sla-jump .sla-jump-breach { color: var(--body-textColor); }
+.sla-jump-error { background: var(--iron); gap: 6px; }
+.sla-jump-error.has-errors { background: var(--red); }
+.sla-error-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.25);
+  font-size: 11px;
+}
+
+.sla-tz { display: flex; align-items: center; gap: var(--space-2); }
+.sla-tz select { min-width: 90px; }
+
+.sla-status { margin: var(--space-3) 0 var(--space-4); }
+
+.sla-card { scroll-margin-top: 96px; }
+.sla-card .hw-header-wrap .lhs { flex-wrap: wrap; }
+.sla-card-actions { display: flex; gap: var(--space-2); }
+.sla-card-actions .btn { padding: 3px 8px; }
+.sla-card-actions iconify-icon { font-size: 16px; }
+.sla-breach-summary {
+  font-weight: 400;
+  font-size: 12.5px;
+  color: var(--iron);
+  white-space: pre;
+  margin-left: var(--space-2);
+}
+
+.sla-table td { vertical-align: top; }
+.sla-table .sla-num { font-family: var(--ds-mono); white-space: nowrap; }
+.sla-table td:nth-child(4), .sla-table td:nth-child(7) { white-space: nowrap; }
+.sla-table .sla-title { min-width: 240px; }
+.sla-table tr.is-approaching td { background: var(--orangeLight); }
+.sla-table tr.is-breached td { background: var(--dangerLight); }
+.sla-table tr.is-breached td.sla-num { color: var(--dangerDark); font-weight: 600; }
+.sla-table tr.has-breach td:nth-child(3) { color: var(--dangerDark); font-weight: 600; }
+.sla-table .sla-empty { padding: var(--space-5); }
+
+/* Maximize: the card fills the window, everything else stays put underneath. */
+.sla-card.is-maximized {
+  position: fixed;
+  inset: var(--space-4);
+  z-index: 60;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow);
+}
+.sla-card.is-maximized .hw-content { flex: 1; overflow: auto; }
+body.sla-has-maximized { overflow: hidden; }
+body.sla-has-maximized::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: var(--cdk-overlay-backdrop);
+}
+
+#sla-error-overlay .fn-modal { width: 100%; max-width: 640px; }
+#sla-error-overlay .fn-modal-content { max-height: calc(100vh - 140px); overflow: auto; }
+.sla-error-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; }
+
+/* ---------------------------------------------------------------------
  * Responsive
  * ------------------------------------------------------------------- */
 @media (max-width: 720px) {

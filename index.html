@@ -15,7 +15,7 @@
 <!-- Page-layout only — component styling comes from the design system above.
      ?v= is bumped on every change so GitHub Pages / browsers don't serve a
      stale cached copy of this file. -->
-<link rel="stylesheet" href="css/style.css?v=7" />
+<link rel="stylesheet" href="css/style.css?v=8" />
 </head>
 <body>
   <header class="app-header" id="app-header" hidden>
@@ -338,6 +338,129 @@
 
   <main class="container" id="app-main" hidden>
 
+    <div class="fn-tabs is-horizontal app-tabs" role="tablist" aria-label="Sections">
+      <button type="button" class="tab active" role="tab" id="tab-update" data-view="update" aria-selected="true" aria-controls="view-update">
+        <iconify-icon icon="ph:cloud-arrow-up"></iconify-icon> Ticket Update
+      </button>
+      <button type="button" class="tab" role="tab" id="tab-sla" data-view="sla" aria-selected="false" aria-controls="view-sla">
+        <iconify-icon icon="ph:timer"></iconify-icon> Ticket SLA
+      </button>
+    </div>
+
+    <!-- TICKET SLA (js/sla.js) -->
+    <div class="app-view" id="view-sla" role="tabpanel" aria-labelledby="tab-sla" hidden>
+      <div class="sla-toolbar">
+        <nav class="sla-jump" aria-label="Jump to table">
+          <a class="btn btn-sm sla-jump-open" href="#sla-open">Open Tickets</a>
+          <a class="btn btn-sm sla-jump-dos" href="#sla-dos">DOS</a>
+          <a class="btn btn-sm sla-jump-breach" href="#sla-breach">SLA Breach</a>
+          <button type="button" class="btn btn-sm sla-jump-error" id="sla-btn-errors">
+            Error <span class="sla-error-count" id="sla-error-count" hidden>0</span>
+          </button>
+        </nav>
+        <div class="sla-toolbar-right">
+          <label class="sla-tz" for="sla-timezone">
+            <span class="muted">Timezone</span>
+            <select id="sla-timezone">
+              <option value="America/Los_Angeles">PST</option>
+              <option value="Asia/Kolkata">IST</option>
+            </select>
+          </label>
+          <button type="button" class="btn btn-primary btn-sm" id="sla-btn-refresh">
+            <iconify-icon icon="ph:arrows-clockwise"></iconify-icon> Refresh from CRM
+          </button>
+        </div>
+      </div>
+      <p class="muted sla-status" id="sla-status">Tickets load straight from vTiger when you open this tab.</p>
+
+      <section class="hw-box-content sla-card" id="sla-open">
+        <div class="hw-header-wrap">
+          <div class="row">
+            <div class="lhs"><i><iconify-icon icon="ph:ticket"></iconify-icon></i> <span>Open Tickets (<span id="sla-open-count">0</span>)</span></div>
+            <div class="sla-card-actions">
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-sla-download="open" title="Download CSV" aria-label="Download Open Tickets as CSV"><iconify-icon icon="ph:download-simple"></iconify-icon></button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-sla-maximize title="Maximize" aria-label="Maximize Open Tickets"><iconify-icon icon="ph:arrows-out"></iconify-icon></button>
+            </div>
+          </div>
+        </div>
+        <div class="hw-content">
+          <div class="pt-wrap">
+            <div class="pt-scroll">
+              <table class="pt-table sla-table">
+                <thead><tr><th>Tickets#</th><th>Internal Severity</th><th class="right">SLA Remaining Hours</th><th>SLA Breach Time</th><th>Organisation</th><th>Title</th><th>Date Created</th></tr></thead>
+                <tbody id="sla-open-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="hw-box-content sla-card" id="sla-dos">
+        <div class="hw-header-wrap">
+          <div class="row">
+            <div class="lhs"><i><iconify-icon icon="ph:calendar-check"></iconify-icon></i> <span>Daily Operation Stats (<span id="sla-dos-count">0</span>)</span></div>
+            <div class="sla-card-actions">
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-sla-download="dos" title="Download CSV" aria-label="Download Daily Operation Stats as CSV"><iconify-icon icon="ph:download-simple"></iconify-icon></button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-sla-maximize title="Maximize" aria-label="Maximize Daily Operation Stats"><iconify-icon icon="ph:arrows-out"></iconify-icon></button>
+            </div>
+          </div>
+        </div>
+        <div class="hw-content">
+          <div class="pt-wrap">
+            <div class="pt-scroll">
+              <table class="pt-table sla-table">
+                <thead><tr><th>Date</th><th class="right">Open Today</th><th class="right">Closed Today</th><th class="right">EOD Open Count</th></tr></thead>
+                <tbody id="sla-dos-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="hw-box-content sla-card" id="sla-breach">
+        <div class="hw-header-wrap">
+          <div class="row">
+            <div class="lhs">
+              <i><iconify-icon icon="ph:warning-octagon"></iconify-icon></i> <span>SLA Breach (<span id="sla-breach-overall">0%</span>)</span>
+              <span class="sla-breach-summary" id="sla-breach-summary">Low: 0% &nbsp; Mid: 0% &nbsp; High: 0%</span>
+            </div>
+            <div class="sla-card-actions">
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-sla-download="breach" title="Download CSV" aria-label="Download SLA Breach as CSV"><iconify-icon icon="ph:download-simple"></iconify-icon></button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-sla-maximize title="Maximize" aria-label="Maximize SLA Breach"><iconify-icon icon="ph:arrows-out"></iconify-icon></button>
+            </div>
+          </div>
+        </div>
+        <div class="hw-content">
+          <div class="pt-wrap">
+            <div class="pt-scroll">
+              <table class="pt-table sla-table">
+                <thead><tr><th>Week</th><th class="right">Total Closed</th><th class="right">Total SLA Breach</th><th class="right">SLA Breach %</th><th class="right">High Breach %</th><th class="right">Mid Breach %</th><th class="right">Low Breach %</th></tr></thead>
+                <tbody id="sla-breach-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="fn-modal-overlay" id="sla-error-overlay" hidden>
+      <div class="fn-modal" role="dialog" aria-modal="true" aria-labelledby="sla-error-title">
+        <div class="fn-modal-header">
+          <h5 class="modal-title" id="sla-error-title">Data Errors</h5>
+          <button class="close" id="sla-error-close" type="button" aria-label="Close">
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="fn-modal-content">
+          <p class="muted" id="sla-error-intro" style="margin-top:0;">No errors detected. Everything is functioning correctly and as expected.</p>
+          <ul class="sla-error-list" id="sla-error-list"></ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- TICKET UPDATE (the original 4-step wizard) -->
+    <div class="app-view" id="view-update" role="tabpanel" aria-labelledby="tab-update">
+
     <ol class="stepper" id="stepper">
       <li class="step active" data-step="1"><span class="step-index">1</span><span class="step-label">Upload</span></li>
       <li class="step" data-step="2"><span class="step-index">2</span><span class="step-label">Map Fields</span></li>
@@ -461,6 +584,8 @@
       </div>
     </section>
 
+    </div><!-- /#view-update -->
+
   </main>
 
   <footer class="app-footer">
@@ -472,7 +597,8 @@
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="js/config.js?v=4"></script>
-  <script src="js/app.js?v=10"></script>
+  <script src="js/config.js?v=7"></script>
+  <script src="js/app.js?v=12"></script>
+  <script src="js/sla.js?v=5"></script>
 </body>
 </html>
