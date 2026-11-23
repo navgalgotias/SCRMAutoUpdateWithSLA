@@ -15,7 +15,7 @@
 <!-- Page-layout only — component styling comes from the design system above.
      ?v= is bumped on every change so GitHub Pages / browsers don't serve a
      stale cached copy of this file. -->
-<link rel="stylesheet" href="css/style.css?v=8" />
+<link rel="stylesheet" href="css/style.css?v=10" />
 </head>
 <body>
   <header class="app-header" id="app-header" hidden>
@@ -366,6 +366,9 @@
               <option value="Asia/Kolkata">IST</option>
             </select>
           </label>
+          <button type="button" class="btn btn-outline-secondary btn-sm is-admin-only" id="sla-btn-settings" hidden>
+            <iconify-icon icon="ph:sliders-horizontal"></iconify-icon> SLA Settings
+          </button>
           <button type="button" class="btn btn-primary btn-sm" id="sla-btn-refresh">
             <iconify-icon icon="ph:arrows-clockwise"></iconify-icon> Refresh from CRM
           </button>
@@ -376,7 +379,7 @@
       <section class="hw-box-content sla-card" id="sla-open">
         <div class="hw-header-wrap">
           <div class="row">
-            <div class="lhs"><i><iconify-icon icon="ph:ticket"></iconify-icon></i> <span>Open Tickets (<span id="sla-open-count">0</span>)</span></div>
+            <div class="lhs"><i><iconify-icon icon="ph:ticket"></iconify-icon></i> <span>Open Tickets (<span id="sla-open-count">0</span>)</span> <span class="sla-open-summary" id="sla-open-summary"></span></div>
             <div class="sla-card-actions">
               <button type="button" class="btn btn-outline-secondary btn-sm" data-sla-download="open" title="Download CSV" aria-label="Download Open Tickets as CSV"><iconify-icon icon="ph:download-simple"></iconify-icon></button>
               <button type="button" class="btn btn-outline-secondary btn-sm" data-sla-maximize title="Maximize" aria-label="Maximize Open Tickets"><iconify-icon icon="ph:arrows-out"></iconify-icon></button>
@@ -454,6 +457,61 @@
         <div class="fn-modal-content">
           <p class="muted" id="sla-error-intro" style="margin-top:0;">No errors detected. Everything is functioning correctly and as expected.</p>
           <ul class="sla-error-list" id="sla-error-list"></ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLA SETTINGS (admins) — same settings as crmsla.altametrics.com → Settings -->
+    <div class="fn-modal-overlay" id="sla-settings-overlay" hidden>
+      <div class="fn-modal" role="dialog" aria-modal="true" aria-labelledby="sla-settings-title">
+        <div class="fn-modal-header">
+          <h5 class="modal-title" id="sla-settings-title">SLA Settings</h5>
+          <button class="close" id="sla-settings-close" type="button" aria-label="Close">
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="fn-modal-content">
+          <p class="muted" style="margin-top:0;">
+            SLA limits, excluded days and excluded dates for the Ticket SLA tab. Saved to the team's Google Sheet, so
+            they apply to everyone.
+          </p>
+
+          <form id="sla-settings-form" autocomplete="off">
+            <h3 class="sla-settings-heading">SLA Breach Limit in Hours</h3>
+            <div class="sla-settings-grid">
+              <div class="field"><label for="sla-limit-High">High</label><input type="number" min="1" step="any" class="form-control" id="sla-limit-High" required /></div>
+              <div class="field"><label for="sla-limit-Medium">Medium</label><input type="number" min="1" step="any" class="form-control" id="sla-limit-Medium" required /></div>
+              <div class="field"><label for="sla-limit-Low">Low</label><input type="number" min="1" step="any" class="form-control" id="sla-limit-Low" required /></div>
+              <div class="field"><label for="sla-approaching-High">High Severity Approaching</label><input type="number" min="1" step="any" class="form-control" id="sla-approaching-High" required /></div>
+              <div class="field"><label for="sla-approaching-Medium">Medium Severity Approaching</label><input type="number" min="1" step="any" class="form-control" id="sla-approaching-Medium" required /></div>
+              <div class="field"><label for="sla-approaching-Low">Low Severity Approaching</label><input type="number" min="1" step="any" class="form-control" id="sla-approaching-Low" required /></div>
+            </div>
+
+            <h3 class="sla-settings-heading">Excluded days</h3>
+            <div class="sla-weekday-row">
+              <label class="sla-check"><input type="checkbox" id="sla-exclude-6" /> Exclude Saturday from SLA</label>
+              <label class="sla-check"><input type="checkbox" id="sla-exclude-0" /> Exclude Sunday from SLA</label>
+            </div>
+
+            <h3 class="sla-settings-heading">Excluded dates</h3>
+            <p class="muted sla-calendar-help">
+              Click a date to exclude it from SLA hours (holidays); click again to include it.
+              <span class="sla-legend"><span class="sla-swatch is-holiday"></span> Excluded date</span>
+              <span class="sla-legend"><span class="sla-swatch is-weekend"></span> Excluded weekday</span>
+            </p>
+            <div class="sla-calendar-nav">
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="sla-cal-prev" aria-label="Earlier months"><iconify-icon icon="ph:caret-left"></iconify-icon></button>
+              <span id="sla-cal-range"></span>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="sla-cal-next" aria-label="Later months"><iconify-icon icon="ph:caret-right"></iconify-icon></button>
+              <span class="muted" id="sla-holiday-count"></span>
+            </div>
+            <div class="sla-calendar" id="sla-calendar"></div>
+
+            <div class="field-actions sla-settings-actions">
+              <button type="submit" class="btn btn-primary" id="sla-settings-save">Update Settings</button>
+              <button type="button" class="btn btn-outline-secondary" id="sla-settings-cancel">Cancel</button>
+            </div>
+          </form>
         </div>
       </div>
     </div>
@@ -597,8 +655,8 @@
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="js/config.js?v=7"></script>
-  <script src="js/app.js?v=12"></script>
-  <script src="js/sla.js?v=5"></script>
+  <script src="js/config.js?v=10"></script>
+  <script src="js/app.js?v=13"></script>
+  <script src="js/sla.js?v=7"></script>
 </body>
 </html>

@@ -697,6 +697,18 @@
     module: () => state.crm.module,
     moduleFields: () => state.moduleFields,
     toast: (message, type) => toast(message, type),
+    isAdmin: () => !!state.auth && state.auth.role === "admin",
+    // Shared Ticket SLA rules from the Sheet (null until an admin saves some).
+    slaSettings: () => loadSettings().sla || null,
+    async saveSlaSettings(sla) {
+      const { settings } = await UserApi.authed("saveSlaSettings", { sla });
+      saveSettings(Object.assign({}, loadSettings(), { sla: settings && settings.sla ? settings.sla : sla }));
+      return loadSettings().sla;
+    },
+    async reloadSlaSettings() {
+      await refreshSettingsFromSheet();
+      return loadSettings().sla || null;
+    },
   };
 
   /* Turn a vTiger `describe` field type into: is it a reference field, and to which modules? */
@@ -1809,7 +1821,7 @@
       toast("Could not save settings to the Google Sheet. " + err.message, "error");
       return;
     }
-    saveSettings(settings);
+    saveSettings(Object.assign({}, loadSettings(), settings)); // keep the cached SLA rules
     state.crm.timeoutMinutes = settings.timeoutMinutes;
     scheduleIdleTimer();
     closeSettingsModal();

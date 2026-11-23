@@ -28,6 +28,19 @@ const USER_COLUMNS = ['username', 'firstName', 'lastName', 'role', 'accessKey', 
 // Columns added after the first release — created automatically on an existing Users tab.
 const AUTO_ADDED_USER_COLUMNS = ['passwordHistory'];
 const SETTING_KEYS = ['url', 'module', 'idField', 'timeoutMinutes'];
+// Ticket SLA rules (limits, weekends, holidays) live in their own tab, one setting per
+// row, so they can be read and edited by hand. Set SLA_SPREADSHEET_ID to another
+// spreadsheet's id to keep them in a separate file instead of this one.
+const SLA_SPREADSHEET_ID = SPREADSHEET_ID;
+const SLA_SHEET = 'SLASetting';
+const SLA_SEVERITIES = ['High', 'Medium', 'Low'];
+const SLA_ROW_LABELS = {
+  limit: (s) => s + ' SLA Limit (hours)',
+  approaching: (s) => s + ' Severity Approaching (hours)',
+  saturday: 'Exclude Saturday',
+  sunday: 'Exclude Sunday',
+  date: 'Excluded Date',
+};
 
 const HASH_ROUNDS = 1000;
 const MIN_PASSWORD_LENGTH = 4;
@@ -65,7 +78,9 @@ function doGet() {
     ok: true,
     service: 'vTiger CRM Auto Update user database',
     sheetId: SPREADSHEET_ID,
-    tabs: { Users: !!ss.getSheetByName(USERS_SHEET), Settings: !!ss.getSheetByName(SETTINGS_SHEET) },
+    tabs: { Users: !!ss.getSheetByName(USERS_SHEET), Settings: !!ss.getSheetByName(SETTINGS_SHEET), SLASetting: !!slaSheet_(false) },
+    // Shows which version of this script the deployment is serving (e.g. whether saveSlaSettings is live).
+    actions: Object.keys(ACTIONS),
   });
 }
 
@@ -261,7 +276,41 @@ const ACTIONS = {
       return { settings: readSettings_() };
     });
   },
+
+  /* Admin: save the shared Ticket SLA rules for everyone. */
+  saveSlaSettings(body) {
+    requireAdmin_(body.token);
+    const sla = validateSlaSettings_(body.sla);
+    return withLock_(() => {
+      writeSlaSettings_(sla);
+      return { settings: readSettings_() };
+    });
+  },
 };
+
+/* Accepts only well-formed SLA rules, so a bad save can't break every user's tab. */
+function validateSlaSettings_(input) {
+  if (!input || typeof input !== 'object') throw error_('Missing SLA settings.', 'bad_request');
+  const hours = (group, label) => {
+    const out = {};
+    SLA_SEVERITIES.forEach((s) => {
+      const v = Number(input[group] && input[group][s]);
+      if (!isFinite(v) || v <= 0 || v > 10000) throw error_(label + ' for ' + s + ' must be a positive number of hours.', 'bad_request');
+      out[s] = v;
+    });
+    return out;
+  };
+  const weekdays = (Array.isArray(input.excludedWeekdays) ? input.excludedWeekdays : [])
+    .map(Number).filter((d) => d >= 0 && d <= 6 && Math.floor(d) === d);
+  const holidays = (Array.isArray(input.holidays) ? input.holidays : [])
+    .map(String).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  return {
+    limits: hours('limits', 'SLA Breach Limit'),
+    approaching: hours('approaching', 'Approaching'),
+    excludedWeekdays: weekdays.filter((d, i) => weekdays.indexOf(d) === i).sort(),
+    holidays: holidays.filter((d, i) => holidays.indexOf(d) === i).sort(),
+  };
+}
 
 /* ---------------------------------------------------------------------
  * Sheet access
@@ -339,7 +388,95 @@ function readSettings_() {
     const v = String(r[1] === undefined ? '' : r[1]).trim();
     if (SETTING_KEYS.indexOf(k) >= 0 && v !== '') settings[k] = k === 'timeoutMinutes' ? Number(v) || 0 : v;
   });
+  const sla = readSlaSettings_();
+  if (sla) settings.sla = sla;
   return settings;
+}
+
+/* ---------------------------------------------------------------------
+ * SLASetting tab — Ticket SLA rules, one per row:
+ *   Setting                              | Value
+ *   High SLA Limit (hours)               | 8      (also Medium, Low)
+ *   High Severity Approaching (hours)    | 2      (also Medium, Low)
+ *   Exclude Saturday / Exclude Sunday    | TRUE / FALSE
+ *   Excluded Date                        | 2026-11-26   (one row per date)
+ * ------------------------------------------------------------------- */
+function slaSheet_(create) {
+  const ss = SpreadsheetApp.openById(SLA_SPREADSHEET_ID);
+  return ss.getSheetByName(SLA_SHEET) || (create ? ss.insertSheet(SLA_SHEET) : null);
+}
+
+/* The saved rules, or null if the tab is missing or holds no complete set of
+ * limits yet (the app then uses its own defaults). */
+function readSlaSettings_() {
+  const sheet = slaSheet_(false);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  const timeZone = sheet.getParent().getSpreadsheetTimeZone();
+  const byLabel = {};
+  const holidays = [];
+  rows.forEach((r) => {
+    const label = String(r[0]).trim().toLowerCase();
+    if (!label) return;
+    if (label === SLA_ROW_LABELS.date.toLowerCase()) {
+      const d = slaDateKey_(r[1], timeZone);
+      if (d) holidays.push(d);
+    } else {
+      byLabel[label] = r[1];
+    }
+  });
+  const sla = { limits: {}, approaching: {}, excludedWeekdays: [], holidays: [] };
+  for (let i = 0; i < SLA_SEVERITIES.length; i += 1) {
+    const s = SLA_SEVERITIES[i];
+    const limit = Number(byLabel[SLA_ROW_LABELS.limit(s).toLowerCase()]);
+    const approaching = Number(byLabel[SLA_ROW_LABELS.approaching(s).toLowerCase()]);
+    if (!(limit > 0) || !(approaching > 0)) return null;
+    sla.limits[s] = limit;
+    sla.approaching[s] = approaching;
+  }
+  if (slaBool_(byLabel[SLA_ROW_LABELS.sunday.toLowerCase()])) sla.excludedWeekdays.push(0);
+  if (slaBool_(byLabel[SLA_ROW_LABELS.saturday.toLowerCase()])) sla.excludedWeekdays.push(6);
+  sla.holidays = holidays.filter((d, i) => holidays.indexOf(d) === i).sort();
+  return sla;
+}
+
+/* Rewrites the whole SLASetting tab from validated rules. */
+function writeSlaSettings_(sla) {
+  const sheet = slaSheet_(true);
+  const rows = [['Setting', 'Value']];
+  SLA_SEVERITIES.forEach((s) => rows.push([SLA_ROW_LABELS.limit(s), sla.limits[s]]));
+  SLA_SEVERITIES.forEach((s) => rows.push([SLA_ROW_LABELS.approaching(s), sla.approaching[s]]));
+  rows.push([SLA_ROW_LABELS.saturday, sla.excludedWeekdays.indexOf(6) >= 0]);
+  rows.push([SLA_ROW_LABELS.sunday, sla.excludedWeekdays.indexOf(0) >= 0]);
+  sla.holidays.forEach((d) => rows.push([SLA_ROW_LABELS.date, d]));
+
+  sheet.clear();
+  const datesFrom = rows.length - sla.holidays.length + 1;
+  // Plain text for the dates, so Sheets doesn't turn them into locale-formatted dates.
+  if (sla.holidays.length) sheet.getRange(datesFrom, 2, sla.holidays.length, 1).setNumberFormat('@');
+  sheet.getRange(1, 1, rows.length, 2).setValues(rows);
+  sheet.getRange(1, 1, 1, 2).setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumn(1);
+}
+
+/* A date cell → 'YYYY-MM-DD'. Accepts real date cells (typed by hand) and
+ * text in YYYY-MM-DD or M/D/YYYY form. */
+function slaDateKey_(value, timeZone) {
+  if (value instanceof Date && !isNaN(value)) {
+    return Utilities.formatDate(value, timeZone, 'yyyy-MM-dd');
+  }
+  const s = String(value || '').trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return m[3] + '-' + ('0' + m[1]).slice(-2) + '-' + ('0' + m[2]).slice(-2);
+  return null;
+}
+
+function slaBool_(value) {
+  if (value === true) return true;
+  return /^(true|yes|y|1)$/i.test(String(value || '').trim());
 }
 
 /* ---------------------------------------------------------------------

@@ -19,7 +19,9 @@
   const bridge = window.CrmBridge;
   if (!bridge) return;
 
-  const RULES = Object.assign({
+  /* Defaults from js/config.js; the limits, excluded weekdays and holidays are
+   * overridden by the shared SLA Settings an admin saved to the Google Sheet. */
+  const CONFIG_RULES = Object.assign({
     limits: { High: 8, Medium: 72, Low: 168 },
     approaching: { High: 2, Medium: 24, Low: 48 },
     excludedWeekdays: [0, 6],
@@ -37,8 +39,17 @@
   const DAY = 24 * HOUR;
   const SEVERITIES = ["High", "Medium", "Low"];
   const TZ_STORAGE_KEY = "vtigerAutoUpdate.slaTimezone.v1";
-  const holidaySet = new Set(RULES.holidays);
-  const excludedWeekdays = new Set(RULES.excludedWeekdays);
+  const SHARED_KEYS = ["limits", "approaching", "excludedWeekdays", "holidays"];
+
+  let RULES, holidaySet, excludedWeekdays;
+  function applyRules() {
+    const saved = bridge.slaSettings() || {};
+    RULES = Object.assign({}, CONFIG_RULES);
+    SHARED_KEYS.forEach((k) => { if (saved[k] !== undefined && saved[k] !== null) RULES[k] = saved[k]; });
+    holidaySet = new Set(RULES.holidays || []);
+    excludedWeekdays = new Set((RULES.excludedWeekdays || []).map(Number));
+  }
+  applyRules();
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -51,6 +62,7 @@
     errorCount: $("sla-error-count"),
     status: $("sla-status"),
     openCount: $("sla-open-count"),
+    openSummary: $("sla-open-summary"),
     openBody: $("sla-open-body"),
     dosCount: $("sla-dos-count"),
     dosBody: $("sla-dos-body"),
@@ -430,15 +442,31 @@
     if (!sla.tickets) return;
     const r = sla.report = buildReport(sla.tickets, els.timezone.value);
 
+    // Approaching = SLA Remaining Hours at or below the severity's "Approaching" setting.
+    const stateOf = (t) => (t.remaining <= 0 ? "is-breached"
+      : t.remaining <= RULES.approaching[t.severity] ? "is-approaching" : "");
+    const approachingCount = r.open.filter((t) => stateOf(t) === "is-approaching").length;
+    const breachedCount = r.open.filter((t) => stateOf(t) === "is-breached").length;
     els.openCount.textContent = r.open.length;
+    els.openSummary.innerHTML =
+      (approachingCount ? '<span class="sla-count is-approaching">' + approachingCount + " approaching</span>" : "") +
+      (breachedCount ? '<span class="sla-count is-breached">' + breachedCount + " breached</span>" : "");
+
     els.openBody.innerHTML = r.open.length ? r.open.map((t) => {
-      const state = t.remaining <= 0 ? "is-breached"
-        : t.remaining <= RULES.approaching[t.severity] ? "is-approaching" : "";
+      const state = stateOf(t);
       const client = t.fromClient ? ' <span class="muted">(client)</span>' : "";
+      const limit = RULES.approaching[t.severity];
+      const remaining = state === "is-approaching"
+        ? '<span class="sla-remaining is-approaching" title="' + t.remaining + " h left — within the " + t.severity +
+          " approaching window (" + limit + ' h)"><iconify-icon icon="ph:warning-fill"></iconify-icon>' + t.remaining + "</span>"
+        : state === "is-breached"
+          ? '<span class="sla-remaining is-breached" title="SLA breached ' + Math.abs(t.remaining) +
+            ' h ago"><iconify-icon icon="ph:warning-octagon-fill"></iconify-icon>' + t.remaining + "</span>"
+          : String(t.remaining);
       return '<tr class="' + state + '">' +
         "<td>" + escapeHtml(t.ticketNo) + "</td>" +
         '<td><span class="fn-tag ' + severityTagClass[t.severity] + '">' + t.severity + "</span>" + client + "</td>" +
-        '<td class="right sla-num">' + t.remaining + client + "</td>" +
+        '<td class="right sla-num">' + remaining + client + "</td>" +
         "<td>" + formatDateTime(t.breachWall) + "</td>" +
         "<td>" + escapeHtml(t.organization) + "</td>" +
         '<td class="sla-title">' + escapeHtml(t.title) + "</td>" +
@@ -491,6 +519,9 @@
     els.btnRefresh.disabled = true;
     setStatus("Loading tickets from vTiger…");
     try {
+      // Pick up SLA Settings another admin may have changed since this page loaded.
+      try { await bridge.reloadSlaSettings(); } catch (_e) { /* keep the cached rules */ }
+      applyRules();
       const { tickets, errors } = await loadTickets();
       sla.tickets = tickets;
       sla.loadErrors = errors;
@@ -546,6 +577,138 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+
+  /* ---------------------------------------------------------------------
+   * SLA Settings (admins) — limits, excluded weekdays, excluded dates
+   * ------------------------------------------------------------------- */
+  const MONTHS_SHOWN = 12;
+  const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
+    "August", "September", "October", "November", "December"];
+  const settingsEls = {
+    btnOpen: $("sla-btn-settings"),
+    overlay: $("sla-settings-overlay"),
+    btnClose: $("sla-settings-close"),
+    btnCancel: $("sla-settings-cancel"),
+    btnSave: $("sla-settings-save"),
+    form: $("sla-settings-form"),
+    calendar: $("sla-calendar"),
+    range: $("sla-cal-range"),
+    count: $("sla-holiday-count"),
+    prev: $("sla-cal-prev"),
+    next: $("sla-cal-next"),
+    weekday: { 6: $("sla-exclude-6"), 0: $("sla-exclude-0") },
+  };
+  const draft = { holidays: new Set(), weekdays: new Set(), firstMonth: null }; // firstMonth = UTC ms of the 1st
+
+  function monthStart(year, monthIndex) { return Date.UTC(year, monthIndex, 1); }
+  function addMonths(ms, n) { const d = new Date(ms); return monthStart(d.getUTCFullYear(), d.getUTCMonth() + n); }
+
+  function renderCalendar() {
+    const todayKey = dateKey(toWall(Date.now(), els.timezone.value));
+    let html = "";
+    for (let m = 0; m < MONTHS_SHOWN; m += 1) {
+      const first = addMonths(draft.firstMonth, m);
+      const d0 = new Date(first);
+      const year = d0.getUTCFullYear();
+      const month = d0.getUTCMonth();
+      const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+      const lead = (d0.getUTCDay() + 6) % 7; // Monday-first grid
+      html += '<div class="sla-month"><div class="sla-month-title">' + MONTH_NAMES[month] + " " + year + "</div>" +
+        '<div class="sla-month-grid" role="group" aria-label="' + MONTH_NAMES[month] + " " + year + '">' +
+        ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((w) => '<span class="sla-dow">' + w + "</span>").join("") +
+        '<span class="sla-pad"></span>'.repeat(lead);
+      for (let day = 1; day <= daysInMonth; day += 1) {
+        const ms = Date.UTC(year, month, day);
+        const key = dateKey(ms);
+        const weekend = draft.weekdays.has(new Date(ms).getUTCDay());
+        const holiday = draft.holidays.has(key);
+        const cls = ["sla-day", weekend ? "is-weekend" : "", holiday ? "is-holiday" : "", key === todayKey ? "is-today" : ""].join(" ");
+        html += weekend
+          ? '<span class="' + cls + '" title="Excluded every week">' + day + "</span>"
+          : '<button type="button" class="' + cls + '" data-date="' + key + '" aria-pressed="' + holiday + '" title="' +
+            (holiday ? "Excluded — click to include" : "Click to exclude") + '">' + day + "</button>";
+      }
+      html += "</div></div>";
+    }
+    settingsEls.calendar.innerHTML = html;
+    const last = new Date(addMonths(draft.firstMonth, MONTHS_SHOWN - 1));
+    const first = new Date(draft.firstMonth);
+    settingsEls.range.textContent = MONTH_NAMES[first.getUTCMonth()].slice(0, 3) + " " + first.getUTCFullYear() +
+      " – " + MONTH_NAMES[last.getUTCMonth()].slice(0, 3) + " " + last.getUTCFullYear();
+    settingsEls.count.textContent = draft.holidays.size + " excluded date(s) in total";
+  }
+
+  async function openSettings() {
+    if (!bridge.isAdmin()) return;
+    try { await bridge.reloadSlaSettings(); } catch (_e) { /* use the cached copy */ }
+    applyRules();
+    SEVERITIES.forEach((s) => {
+      $("sla-limit-" + s).value = RULES.limits[s];
+      $("sla-approaching-" + s).value = RULES.approaching[s];
+    });
+    draft.weekdays = new Set(excludedWeekdays);
+    draft.holidays = new Set(holidaySet);
+    settingsEls.weekday[6].checked = draft.weekdays.has(6);
+    settingsEls.weekday[0].checked = draft.weekdays.has(0);
+    const now = new Date(toWall(Date.now(), els.timezone.value));
+    draft.firstMonth = monthStart(now.getUTCFullYear(), now.getUTCMonth() - 5); // 5 months back, 6 ahead
+    renderCalendar();
+    settingsEls.overlay.hidden = false;
+  }
+
+  function closeSettings() { settingsEls.overlay.hidden = true; }
+
+  settingsEls.calendar.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-date]");
+    if (!btn) return;
+    const key = btn.dataset.date;
+    if (draft.holidays.has(key)) draft.holidays.delete(key);
+    else draft.holidays.add(key);
+    renderCalendar();
+    const again = settingsEls.calendar.querySelector('button[data-date="' + key + '"]');
+    if (again) again.focus();
+  });
+
+  [6, 0].forEach((wd) => settingsEls.weekday[wd].addEventListener("change", () => {
+    if (settingsEls.weekday[wd].checked) draft.weekdays.add(wd);
+    else draft.weekdays.delete(wd);
+    renderCalendar();
+  }));
+
+  settingsEls.prev.addEventListener("click", () => { draft.firstMonth = addMonths(draft.firstMonth, -6); renderCalendar(); });
+  settingsEls.next.addEventListener("click", () => { draft.firstMonth = addMonths(draft.firstMonth, 6); renderCalendar(); });
+
+  settingsEls.form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const sla = { limits: {}, approaching: {}, excludedWeekdays: Array.from(draft.weekdays).sort(), holidays: Array.from(draft.holidays).sort() };
+    for (const s of SEVERITIES) {
+      sla.limits[s] = Number($("sla-limit-" + s).value);
+      sla.approaching[s] = Number($("sla-approaching-" + s).value);
+      if (!(sla.limits[s] > 0) || !(sla.approaching[s] > 0)) {
+        bridge.toast("Every SLA limit and approaching value must be a positive number of hours.", "error");
+        return;
+      }
+    }
+    settingsEls.btnSave.disabled = true;
+    try {
+      await bridge.saveSlaSettings(sla);
+    } catch (err) {
+      bridge.toast("Could not save SLA settings to the Google Sheet. " + err.message, "error");
+      return;
+    } finally {
+      settingsEls.btnSave.disabled = false;
+    }
+    applyRules();
+    render(); // the rules only change the maths, so no need to reload tickets
+    closeSettings();
+    bridge.toast("SLA settings saved for everyone.", "success");
+  });
+
+  settingsEls.btnOpen.addEventListener("click", openSettings);
+  settingsEls.btnClose.addEventListener("click", closeSettings);
+  settingsEls.btnCancel.addEventListener("click", closeSettings);
+  settingsEls.overlay.addEventListener("click", (e) => { if (e.target === settingsEls.overlay) closeSettings(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSettings(); });
 
   /* ---------------------------------------------------------------------
    * Wiring
@@ -620,10 +783,11 @@
     sla.stale = true;
     els.openBody.innerHTML = els.dosBody.innerHTML = els.breachBody.innerHTML = "";
     els.openCount.textContent = els.dosCount.textContent = "0";
+    els.openSummary.innerHTML = "";
     setStatus("Tickets load straight from vTiger when you open this tab.");
     showView("update");
   });
 
   // Exposed for checking the calculations from the console / tests.
-  window.TicketSla = { RULES, buildReport, addSlaHours, slaHoursBetween, parseWall, parseInstant, toWall, fromWall, phpRound };
+  window.TicketSla = { get RULES() { return RULES; }, buildReport, addSlaHours, slaHoursBetween, parseWall, parseInstant, toWall, fromWall, phpRound };
 })();

@@ -61,7 +61,7 @@ number matched:
 
 - **SLA hours** run 24 hours a day but skip excluded weekdays (Sat/Sun) and holidays entirely.
 - **Severity** = *Internal Severity*. When that's blank, the client's *Severity* is used and the row is tagged *(client)*.
-- **SLA Breach Time** = Created Time + the severity's limit (High 8 h, Medium 72 h, Low 168 h) in SLA hours.
+- **SLA Breach Time** = Created Time + the severity's limit (set in SLA Settings; defaults High 8 h, Medium 72 h, Low 168 h) in SLA hours.
 - **SLA Remaining Hours** = SLA hours from now to the breach time, rounded to the nearest hour (times to the whole minute).
 - **Closed** = Internal Status *Closed*, at its *Internal Closed Time*. A closed ticket **breached** if that is after its breach time.
 - **Breach %** = breached ÷ closed, rounded (the header shows 2 decimals). The High/Mid/Low rates count only tickets that have an Internal Severity.
@@ -71,8 +71,31 @@ number matched:
 rates far too low. This tab reads all three. Tickets it still can't use (an unreadable date, or *Closed* with no
 closed time) are listed under **Error**.
 
-The rules (SLA hours, approaching thresholds, excluded weekdays, holidays, how far back to load, timezones, field
-labels) are in `js/config.js` under `sla`. Add each year's holidays there.
+### SLA Settings (Admins)
+
+**SLA Settings** in the Ticket SLA toolbar is the same page as the CRM SLA app's Settings:
+
+- **SLA Breach Limit in Hours** for High / Medium / Low, and how many hours before breach a ticket counts as **Approaching**.
+- **Excluded days:** leave every Saturday and/or Sunday out of SLA hours.
+- **Excluded dates:** a 12-month calendar (‹ › moves 6 months). Click a date to exclude it as a holiday, and click
+  again to include it. Days already excluded every week are shaded and can't be clicked.
+
+**Update Settings** saves them to the **SLASetting** tab of the team's Google Sheet, so everyone gets them, and the
+tables recalculate straight away. The tab holds one setting per row and can also be edited by hand:
+
+| Setting | Value |
+| --- | --- |
+| High / Medium / Low SLA Limit (hours) | `8` / `72` / `168` |
+| High / Medium / Low Severity Approaching (hours) | `2` / `24` / `48` |
+| Exclude Saturday, Exclude Sunday | `TRUE` / `FALSE` |
+| Excluded Date (one row per date) | `2026-11-26` |
+
+Saving rewrites the whole tab. The script creates the tab if it doesn't exist, and to keep it in a different
+spreadsheet, set `SLA_SPREADSHEET_ID` in `Code.gs`. Everyone else picks them up on their next **Refresh from CRM**. Saving needs the current
+`apps-script/Code.gs` deployed (see [Updating the script](#user-database-google-sheet)).
+
+Until an admin saves SLA Settings, the defaults in `js/config.js` under `sla` apply. That file also holds the settings
+that aren't on the page: how far back to load, excluded organizations, timezones and field labels.
 
 ## Project structure
 
